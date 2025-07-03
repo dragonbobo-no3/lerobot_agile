@@ -182,3 +182,18 @@ class Robot(abc.ABC):
     def disconnect(self) -> None:
         """Disconnect from the robot and perform any necessary cleanup."""
         pass
+
+    @abc.abstractmethod
+    def step(self) -> None:
+        """Make env moves one step"""
+        pass
+
+    @abc.abstractmethod
+    def render_image(self, bgr, need_to_show):
+        """Render the image and decide whether to show"""
+        pass
+
+    @abc.abstractmethod
+    def render_viewer(self):
+        """Render the viewer"""
+        pass
