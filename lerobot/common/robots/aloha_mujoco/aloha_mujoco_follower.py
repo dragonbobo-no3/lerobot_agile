@@ -89,6 +89,10 @@ class AlohaMujocoFollower(Robot):
         # self.viewer.azimuth = 45    # 水平方位角（度）
         # self.viewer.elevation = -45 # 俯仰角（度）
         self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+        self.viewer.cam.lookat[:] = [0.0, 0.0, 1.0]   # 目标点坐标（模型中心）
+        self.viewer.cam.distance = 2                  # 到目标的距离
+        self.viewer.cam.azimuth = 0                  # 水平旋转角度
+        self.viewer.cam.elevation = -45               # 向下俯视
 
         # 创建帧缓冲对象
         framebuffer = mujoco.MjrRect(0, 0, *self.resolution)
