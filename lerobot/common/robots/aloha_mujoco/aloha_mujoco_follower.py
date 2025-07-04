@@ -42,8 +42,6 @@ from ..utils import ensure_safe_goal_position
 from .config_aloha_mujoco_follower import AlohaMujocoFollowerConfig
 
 logger = logging.getLogger(__name__)
-
-
 class AlohaMujocoFollower(Robot):
     config_class = AlohaMujocoFollowerConfig
     name = "aloha_mujoco_follower"
@@ -80,7 +78,7 @@ class AlohaMujocoFollower(Robot):
             self.offscreens[f"offscreen_{i}"].type = mujoco.mjtCamera.mjCAMERA_FIXED
             self.offscreens[f"offscreen_{i}"].fixedcamid = i
 
-        #创建可拖动视角
+        #创建其他不做数据的固定相机
         # self.viewer = mujoco.MjvCamera()
         # self.viewer.type = mujoco.mjtCamera.mjCAMERA_TRACKING
         # tracking_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "fl_link1")
@@ -88,6 +86,8 @@ class AlohaMujocoFollower(Robot):
         # self.viewer.distance = 2  # 相机与目标的距离
         # self.viewer.azimuth = 45    # 水平方位角（度）
         # self.viewer.elevation = -45 # 俯仰角（度）
+
+        # 创建可拖动视角
         self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
         self.viewer.cam.lookat[:] = [0.0, 0.0, 1.0]   # 目标点坐标（模型中心）
         self.viewer.cam.distance = 2                  # 到目标的距离
@@ -100,6 +100,19 @@ class AlohaMujocoFollower(Robot):
 
         self.is_enabled_ = True
         self.is_robot_connected_ = True
+
+        # 校准参数（和现实松灵臂）
+        self.right_bias = np.array([9.83900375e-03, 3.55023312e-02, 3.11918405e+00, -1.70167349e-01,                                   
+                                    -8.71561797e-03, -1.39412725e-02, 4.46428572e-05])
+        self.left_bias = np.array([4.91205376e-03, 3.08380829e-02, 3.12512528e+00, -1.52382061e-01,
+                                     -1.31789072e-02, -1.28610098e-02, 8.97072712e-05])
+        self.right_scale = np.array([1.16113983, 0.9187596, 1.02111805, 1.02622979, 1.1946608,
+                                      1.48471411, 0.03654068])
+        self.left_scale = np.array([1.16057805, 0.91882059, 1.02681781, 1.02765416, 1.19477187, 1.4826585,
+                                     0.0367132])
+        
+        # self.max = np.zeros(7)
+        # self.min = np.ones(7)
 
     @property
     def _motors_ft(self) -> dict[str, type]:
@@ -193,30 +206,40 @@ class AlohaMujocoFollower(Robot):
             raise DeviceNotConnectedError(f"{self} is not connected.")
         if not self.is_enabled:
             self.enable()
-        
+        # print(action)
         goal_pos_left = {key.removesuffix(".pos").removeprefix(f"left."): val for key, val in action.items() if
                     (key.endswith(".pos") and key.startswith("left"))}
         goal_pos_right = {key.removesuffix(".pos").removeprefix(f"right."): val for key, val in action.items() if
                     (key.endswith(".pos") and key.startswith("right"))}
 
-        # Cap goal position when too far away from present position.
-        # /!\ Slower fps expected due to reading from the follower.
-        # if self.config.max_relative_target is not None:
-        #     present_pos = {
-        #         f"joint{i}":
-        #             (getattr(self.piper.GetArmJointMsgs().joint_state, f"joint_{i + 1}") / 1000) * math.pi / 180
-        #         for i in range(6)  # 从 0 到 5
-        #     }
-        #     present_pos["joint6"] = self.piper.GetArmGripperMsgs().gripper_state.grippers_angle / 1000000
-        #
-        #     goal_present_pos = {key: (g_pos, present_pos[key]) for key, g_pos in goal_pos.items()}
-        #     goal_pos = ensure_safe_goal_position(goal_present_pos, self.config.max_relative_target)
-
         # Send goal position to the arm
         factor = 1000 * 180 / math.pi
+
         for i in range(7):
-            self.data.actuator(f"fl_joint{i+1}").ctrl = float(goal_pos_left[f"joint{i}"].item()/factor)
-            self.data.actuator(f"fr_joint{i+1}").ctrl = float(goal_pos_right[f"joint{i}"].item()/factor)
+
+            if i == 2: #仿真的第三轴反了
+                goal_left = 3.14 - (float(goal_pos_left[f"joint{i}"].item()/factor) * self.left_scale[i] + self.left_bias[i])
+                goal_right = 3.14 - (float(goal_pos_right[f"joint{i}"].item()/factor) * self.right_scale[i] + self.right_bias[i])
+            else:
+                goal_left = float(goal_pos_left[f"joint{i}"].item()/factor) * self.left_scale[i] + self.left_bias[i]
+                goal_right = float(goal_pos_right[f"joint{i}"].item()/factor) * self.right_scale[i] + self.right_bias[i]
+
+            self.data.actuator(f"fl_joint{i+1}").ctrl = goal_left
+            self.data.actuator(f"fr_joint{i+1}").ctrl = goal_right
+
+            if i == 6: #仿真的夹爪把两边分开定义了
+                self.data.actuator(f"fl_joint{i+2}").ctrl = goal_left
+                self.data.actuator(f"fr_joint{i+2}").ctrl = goal_right
+
+            # if goal_left > self.max[i]:
+            #     self.max[i] = goal_left
+            # if goal_left < self.min[i]:
+            #     self.min[i] = goal_left
+            # if i == 2:
+            #     print(f"fl_joint{i+1} ctrl: {goal_left}, fr_joint{i+1} ctrl: {goal_right}")
+
+        # print(f"max: {self.max}, min: {self.min}")
+
         if need_to_show:
             for i in range(3):
                 start = time.perf_counter()
@@ -264,26 +287,6 @@ class AlohaMujocoFollower(Robot):
     
     def render_viewer(self):
         """Render the scene using the viewer."""
-        # viewport = mujoco.MjrRect(0, 0, *self.resolution)
-        # mujoco.mjv_updateScene(self.model, self.data, mujoco.MjvOption(), 
-        #                 mujoco.MjvPerturb(), self.viewer,
-        #                 mujoco.mjtCatBit.mjCAT_ALL, self.scene)
-        # mujoco.mjr_render(viewport, self.scene, self.context)   
-        # rgb = np.zeros((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
-        # mujoco.mjr_readPixels(rgb, None, viewport, self.context)
-        # bgr = cv2.cvtColor(np.flipud(rgb), cv2.COLOR_RGB2BGR)
-        # cv2.imshow('Viewer', bgr)
-        # cv2.waitKey(1)
-
-        # with mujoco.viewer.launch_passive(self.model, self.data) as viewer:
-        #     while viewer.is_running():
-
-        #         # 查看器选项的修改示例：每两秒钟切换一次接触点。
-        #         with viewer.lock():
-        #             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTPOINT] = int(self.data.time % 2)
-
-        #         # 获取物理状态的更改，应用扰动，从GUI更新选项。
-        #         viewer.sync()
         self.viewer.sync()
 
        
