@@ -71,6 +71,8 @@ class ReplayConfig:
     # Use vocal synthesis to read events.
     play_sounds: bool = True
     replay_mode: int = 0
+    render_viewer: bool = True
+    render_camera: bool = True
 
 
 @draccus.wrap()
@@ -80,6 +82,8 @@ def replay(cfg: ReplayConfig):
 
     robot = make_robot_from_config(cfg.robot)
     dataset = LeRobotDataset(cfg.dataset.repo_id, root=cfg.dataset.root, episodes=[cfg.dataset.episode])
+    if cfg.render_viewer:
+        robot.render_viewer()
     # actions = dataset.hf_dataset.select_columns("action")
     replay_type = ''
     if cfg.replay_mode == 0:
@@ -100,8 +104,9 @@ def replay(cfg: ReplayConfig):
             action[name] = action_array[i]
         # print(action)
         # exit(1)
-        robot.send_action(action, False)
-        robot.render_viewer()
+        robot.send_action(action, cfg.render_camera)
+        if cfg.render_viewer:
+            robot.viewer_step()
         robot.step()
         dt_s = time.perf_counter() - start_episode_t
         busy_wait(1 / dataset.fps - dt_s)

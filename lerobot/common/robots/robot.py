@@ -197,3 +197,8 @@ class Robot(abc.ABC):
     def render_viewer(self):
         """Render the viewer"""
         pass
+
+    @abc.abstractmethod
+    def viewer_step(self):
+        """Step the viewer"""
+        pass
