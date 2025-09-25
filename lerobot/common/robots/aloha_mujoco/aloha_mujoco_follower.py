@@ -21,8 +21,6 @@ from functools import cached_property
 from gc import enable
 from typing import Any
 import os
-import mujoco.msh2obj_test
-import mujoco.viewer
 import numpy as np
 
 from lerobot.common.cameras.utils import make_cameras_from_configs
@@ -34,6 +32,7 @@ from lerobot.common.motors.dynamixel import (
 )
 
 import mujoco
+import mujoco.viewer
 import cv2
 import glfw
 
@@ -274,7 +273,10 @@ class AlohaMujocoFollower(Robot):
         bgr = cv2.cvtColor(np.flipud(rgb), cv2.COLOR_RGB2BGR)
         # cv2.imwrite(f"debug_output{camera_id}_{idx}.png", bgr)
         if (need_to_show):
+            cv2.namedWindow(f'Camera{camera_id}', cv2.WINDOW_NORMAL)  # 或使用 cv2.WINDOW_AUTOSIZE
+            cv2.resizeWindow(f'Camera{camera_id}', width=400, height=300)
             cv2.imshow(f'Camera{camera_id}', bgr)
+            # cv2.resizeWindow(f'Camera{camera_id}', 200, 150)
             cv2.waitKey(1)  # Wait for a short time to allow the image show
         return bgr
     
