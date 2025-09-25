@@ -54,13 +54,43 @@ def auto_downsample_height_width(img: np.ndarray, target_size: int = 150, max_si
     return img[:, ::downsample_factor, ::downsample_factor]
 
 
-def sample_images(image_paths: list[str]) -> np.ndarray:
-    sampled_indices = sample_indices(len(image_paths))
+# def sample_images(image_paths: list[str]) -> np.ndarray:
+#     sampled_indices = sample_indices(len(image_paths))
+
+#     images = None
+#     for i, idx in enumerate(sampled_indices):
+#         path = image_paths[idx]
+#         # we load as uint8 to reduce memory usage
+#         img = load_image_as_numpy(path, dtype=np.uint8, channel_first=True)
+#         img = auto_downsample_height_width(img)
+
+#         if images is None:
+#             images = np.empty((len(sampled_indices), *img.shape), dtype=np.uint8)
+
+#         images[i] = img
+
+#     return images
+
+def sample_images(image_data: list[str] | list[np.ndarray] | np.ndarray) -> np.ndarray:
+    # 如果是 list 且第一个元素是 numpy，则转为 np.ndarray
+    if isinstance(image_data, list) and len(image_data) > 0 and isinstance(image_data[0], np.ndarray):
+        image_data = np.stack(image_data, axis=0)
+    if isinstance(image_data, np.ndarray):
+        sampled_indices = sample_indices(len(image_data))
+        images = image_data[sampled_indices]
+        # 强制转换为 (C, H, W)
+        images = np.array([
+            img if img.shape[0] == 3 else np.transpose(img, (2, 0, 1))
+            for img in images
+        ])
+        images = np.array([auto_downsample_height_width(img if img.ndim==3 else img.transpose(2,0,1)) for img in images])
+        return images
+    # 路径列表逻辑
+    sampled_indices = sample_indices(len(image_data))
 
     images = None
     for i, idx in enumerate(sampled_indices):
-        path = image_paths[idx]
-        # we load as uint8 to reduce memory usage
+        path = image_data[idx]
         img = load_image_as_numpy(path, dtype=np.uint8, channel_first=True)
         img = auto_downsample_height_width(img)
 
@@ -70,7 +100,6 @@ def sample_images(image_paths: list[str]) -> np.ndarray:
         images[i] = img
 
     return images
-
 
 def get_feature_stats(array: np.ndarray, axis: tuple, keepdims: bool) -> dict[str, np.ndarray]:
     return {

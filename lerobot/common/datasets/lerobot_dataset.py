@@ -69,6 +69,7 @@ from lerobot.common.datasets.video_utils import (
     VideoFrame,
     decode_video_frames,
     encode_video_frames,
+    encode_video_from_numpy,
     get_safe_default_codec,
     get_video_info,
 )
@@ -818,6 +819,9 @@ class LeRobotDataset(torch.utils.data.Dataset):
         """
         if not episode_data:
             episode_buffer = self.episode_buffer
+        else:
+            episode_buffer = episode_data
+            self.episode_buffer = episode_buffer  # 确保 buffer 可用，供视频编码判断
 
         validate_episode_buffer(episode_buffer, self.meta.total_episodes, self.features)
 
@@ -941,22 +945,36 @@ class LeRobotDataset(torch.utils.data.Dataset):
 
     def encode_episode_videos(self, episode_index: int) -> dict:
         """
-        Use ffmpeg to convert frames stored as png into mp4 videos.
-        Note: `encode_video_frames` is a blocking call. Making it asynchronous shouldn't speedup encoding,
-        since video encoding with ffmpeg is already using multithreading.
+        自动判断，优先用 numpy buffer 编码视频，否则用图片文件夹。
         """
+        from lerobot.common.datasets.video_utils import encode_video_from_numpy
+        import numpy as np
         video_paths = {}
+        # 获取 episode_buffer
+        if hasattr(self, "episode_buffer") and self.episode_buffer is not None:
+            buffer = self.episode_buffer
+        else:
+            buffer = None
         for key in self.meta.video_keys:
             video_path = self.root / self.meta.get_video_file_path(episode_index, key)
             video_paths[key] = str(video_path)
             if video_path.is_file():
-                # Skip if video is already encoded. Could be the case when resuming data recording.
                 continue
-            img_dir = self._get_image_file_path(
-                episode_index=episode_index, image_key=key, frame_index=0
-            ).parent
-            encode_video_frames(img_dir, video_path, self.fps, overwrite=True)
-
+            # 判断是否有 numpy buffer
+            frames = None
+            if buffer is not None and key in buffer:
+                val = buffer[key]
+                if isinstance(val, np.ndarray):
+                    frames = val
+                elif isinstance(val, list) and len(val) > 0 and isinstance(val[0], np.ndarray):
+                    frames = np.stack(val, axis=0)
+            if frames is not None:
+                encode_video_from_numpy(frames, video_path, self.fps, overwrite=True)
+            else:
+                img_dir = self._get_image_file_path(
+                    episode_index=episode_index, image_key=key, frame_index=0
+                ).parent
+                encode_video_frames(img_dir, video_path, self.fps, overwrite=True)
         return video_paths
 
     @classmethod

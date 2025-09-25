@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import av
+import numpy as np
 import pyarrow as pa
 import torch
 import torchvision
@@ -326,6 +327,70 @@ def encode_video_frames(
     if log_level is not None:
         av.logging.restore_default_callback()
 
+    if not video_path.exists():
+        raise OSError(f"Video encoding did not work. File not found: {video_path}.")
+
+
+def encode_video_from_numpy(
+    frames: np.ndarray,
+    video_path: Path | str,
+    fps: int,
+    vcodec: str = "libsvtav1",
+    pix_fmt: str = "yuv420p",
+    g: int | None = 2,
+    crf: int | None = 30,
+    fast_decode: int = 0,
+    log_level: int | None = av.logging.ERROR,
+    overwrite: bool = False,
+) -> None:
+    """
+    直接用 numpy buffer 编码视频，无需图片文件。frames: (N, H, W, C) 或 (N, C, H, W)
+    """
+    video_path = Path(video_path)
+    video_path.parent.mkdir(parents=True, exist_ok=overwrite)
+    if vcodec not in ["h264", "hevc", "libsvtav1"]:
+        raise ValueError(f"Unsupported video codec: {vcodec}. Supported codecs are: h264, hevc, libsvtav1.")
+    if (vcodec == "libsvtav1" or vcodec == "hevc") and pix_fmt == "yuv444p":
+        logging.warning(f"Incompatible pixel format 'yuv444p' for codec {vcodec}, auto-selecting format 'yuv420p'")
+        pix_fmt = "yuv420p"
+    video_options = {}
+    if g is not None:
+        video_options["g"] = str(g)
+    if crf is not None:
+        video_options["crf"] = str(crf)
+    if fast_decode:
+        key = "svtav1-params" if vcodec == "libsvtav1" else "tune"
+        value = f"fast-decode={fast_decode}" if vcodec == "libsvtav1" else "fastdecode"
+        video_options[key] = value
+    if log_level is not None:
+        logging.getLogger("libav").setLevel(log_level)
+    # frames shape: (N, H, W, C) or (N, C, H, W)
+    if frames.ndim != 4:
+        raise ValueError("frames must be 4D numpy array")
+    N = frames.shape[0]
+    # Convert to (N, H, W, C)
+    if frames.shape[1] in [1, 3, 4]:
+        # (N, C, H, W) -> (N, H, W, C)
+        frames = np.transpose(frames, (0, 2, 3, 1))
+    with av.open(str(video_path), "w") as output:
+        output_stream = output.add_stream(vcodec, fps, options=video_options)
+        output_stream.pix_fmt = pix_fmt
+        output_stream.width = frames.shape[2]
+        output_stream.height = frames.shape[1]
+        for i in range(N):
+            frame = frames[i]
+            # 确保 uint8
+            if frame.dtype != np.uint8:
+                frame = (frame * 255).astype(np.uint8) if frame.max() <= 1.0 else frame.astype(np.uint8)
+            input_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
+            packet = output_stream.encode(input_frame)
+            if packet:
+                output.mux(packet)
+        packet = output_stream.encode()
+        if packet:
+            output.mux(packet)
+    if log_level is not None:
+        av.logging.restore_default_callback()
     if not video_path.exists():
         raise OSError(f"Video encoding did not work. File not found: {video_path}.")
 
